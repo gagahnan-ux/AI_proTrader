@@ -3,76 +3,113 @@ const app = express();
 
 app.use(express.json());
 
-let lastSignal = {
-  signal: "HOLD",
-  confidence: 0,
-  sl: 80,
-  tp: 120,
-  mode: "AGGRESSIVE"
-};
+let latestData = {};
+let lastSignal = "HOLD";
 
-// ================= AI AGGRESSIVE =================
-function analyze(d) {
-  const { rsi, emaFast, emaSlow, macd, atr } = d;
+// ===== CONFIG =====
+const MODE = "AGGRESSIVE_V2"; // SAFE / AGGRESSIVE_V2
 
-  let signal = "HOLD";
-  let confidence = 0;
-
-  const trendUp = emaFast > emaSlow;
-  const trendDown = emaFast < emaSlow;
-
-  // ================= MAIN ENTRY =================
-  if (trendUp && rsi > 50) {
-    signal = "BUY";
-    confidence = 60 + (macd * 10);
-  }
-
-  if (trendDown && rsi < 50) {
-    signal = "SELL";
-    confidence = 60 + (Math.abs(macd) * 10);
-  }
-
-  // ================= EXTRA ENTRY =================
-  if (rsi > 65) {
-    signal = "BUY";
-    confidence = 70;
-  }
-
-  if (rsi < 35) {
-    signal = "SELL";
-    confidence = 70;
-  }
-
-  // ================= ANTI HOLD =================
-  if (signal === "HOLD") {
-    if (macd > 0) signal = "BUY";
-    if (macd < 0) signal = "SELL";
-    confidence = 55;
-  }
-
-  // ================= SL TP =================
-  const sl = Math.max(60, Math.round(atr * 1.0));
-  const tp = Math.max(100, Math.round(atr * 2.0));
-
-  return {
-    signal,
-    confidence: Math.min(95, Math.round(confidence)),
-    sl,
-    tp,
-    mode: "AGGRESSIVE_V2"
-  };
-}
-
-// ================= ROUTES =================
+// ===== RECEIVE DATA FROM MT5 =====
 app.post("/data", (req, res) => {
-  lastSignal = analyze(req.body);
-  res.json({ status: "ok" });
+    try {
+        latestData = req.body;
+        console.log("📩 DATA:", latestData);
+        res.json({ status: "ok" });
+    } catch (err) {
+        console.log("❌ DATA ERROR:", err);
+        res.status(500).send("error");
+    }
 });
 
+// ===== AI SIGNAL ENGINE =====
 app.get("/signal", (req, res) => {
-  res.json(lastSignal);
+    try {
+        let { rsi, emaFast, emaSlow, macd, atr } = latestData;
+
+        if (!rsi) {
+            return res.json({
+                signal: "HOLD",
+                confidence: 0,
+                sl: 100,
+                tp: 100,
+                mode: "WAIT_DATA"
+            });
+        }
+
+        let signal = "HOLD";
+        let confidence = 0;
+
+        // ===== TREND =====
+        let trend = emaFast > emaSlow ? "UP" : "DOWN";
+
+        // ===== AGGRESSIVE V2 LOGIC =====
+        if (MODE === "AGGRESSIVE_V2") {
+
+            // BUY CONDITIONS (relax)
+            if (
+                rsi < 60 &&                // tak perlu oversold
+                macd > -0.5 &&            // allow weak momentum
+                trend === "UP"
+            ) {
+                signal = "BUY";
+                confidence = 70;
+            }
+
+            // SELL CONDITIONS (relax)
+            if (
+                rsi > 40 &&
+                macd < 0.5 &&
+                trend === "DOWN"
+            ) {
+                signal = "SELL";
+                confidence = 70;
+            }
+
+            // BOOST jika strong move
+            if (Math.abs(macd) > 1.5) {
+                confidence += 15;
+            }
+
+            if (atr > 2.0) {
+                confidence += 10;
+            }
+        }
+
+        // ===== ANTI HOLD SYSTEM =====
+        if (signal === "HOLD") {
+            // paksa trade kalau terlalu lama hold
+            if (lastSignal === "BUY") signal = "BUY";
+            else if (lastSignal === "SELL") signal = "SELL";
+        }
+
+        if (signal !== "HOLD") {
+            lastSignal = signal;
+        }
+
+        // ===== DYNAMIC SL TP =====
+        let sl = Math.max(80, atr * 40);
+        let tp = Math.max(120, atr * 60);
+
+        const result = {
+            signal,
+            confidence,
+            sl: Math.round(sl),
+            tp: Math.round(tp),
+            mode: MODE
+        };
+
+        console.log("🚀 SIGNAL:", result);
+
+        res.json(result);
+
+    } catch (err) {
+        console.log("❌ SIGNAL ERROR:", err);
+        res.status(500).send("error");
+    }
 });
 
-app.listen(process.env.PORT || 10000, () =>
-  console.log("🚀 AGGRESSIVE AI RUNNING")
-);
+// ===== START SERVER =====
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+    console.log("🚀 AI SERVER RUNNING ON PORT", PORT);
+});
