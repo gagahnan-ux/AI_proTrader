@@ -42,39 +42,32 @@ app.get("/signal", (req, res) => {
         // ===== TREND =====
         let trend = emaFast > emaSlow ? "UP" : "DOWN";
 
-        // ===== AGGRESSIVE V2 LOGIC =====
-        if (MODE === "AGGRESSIVE_V2") {
+        // ===== AGGRESSIVE V2 FIX =====
 
-            // BUY CONDITIONS (relax)
-            if (
-                rsi < 60 &&                // tak perlu oversold
-                macd > -0.5 &&            // allow weak momentum
-                trend === "UP"
-            ) {
-                signal = "BUY";
-                confidence = 70;
-            }
+// TREND
+let trend = emaFast > emaSlow ? "UP" : "DOWN";
 
-            // SELL CONDITIONS (relax)
-            if (
-                rsi > 40 &&
-                macd < 0.5 &&
-                trend === "DOWN"
-            ) {
-                signal = "SELL";
-                confidence = 70;
-            }
+// FORCE ENTRY SYSTEM
+if (trend === "UP") {
+    signal = "BUY";
+    confidence = 65;
+}
 
-            // BOOST jika strong move
-            if (Math.abs(macd) > 1.5) {
-                confidence += 15;
-            }
+if (trend === "DOWN") {
+    signal = "SELL";
+    confidence = 65;
+}
 
-            if (atr > 2.0) {
-                confidence += 10;
-            }
-        }
+// BOOST CONFIDENCE
+if (Math.abs(macd) > 0.5) confidence += 10;
+if (atr > 2.0) confidence += 10;
 
+// RSI fine tune (optional)
+if (signal === "BUY" && rsi < 50) confidence += 5;
+if (signal === "SELL" && rsi > 50) confidence += 5;
+
+// LIMIT
+if (confidence > 95) confidence = 95;
         // ===== ANTI HOLD SYSTEM =====
         if (signal === "HOLD") {
             // paksa trade kalau terlalu lama hold
