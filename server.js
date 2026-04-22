@@ -3,11 +3,9 @@ const app = express();
 
 app.use(express.json());
 
+// ===== STORAGE =====
 let latestData = {};
-let lastSignal = "HOLD";
-
-// ===== CONFIG =====
-const MODE = "AGGRESSIVE_V2"; // SAFE / AGGRESSIVE_V2
+let lastSignal = "BUY"; // default supaya tak stuck HOLD
 
 // ===== RECEIVE DATA FROM MT5 =====
 app.post("/data", (req, res) => {
@@ -21,17 +19,18 @@ app.post("/data", (req, res) => {
     }
 });
 
-// ===== AI SIGNAL ENGINE =====
+// ===== AI SIGNAL =====
 app.get("/signal", (req, res) => {
     try {
         let { rsi, emaFast, emaSlow, macd, atr } = latestData;
 
-        if (!rsi) {
+        // ===== NO DATA =====
+        if (rsi === undefined) {
             return res.json({
-                signal: "HOLD",
-                confidence: 0,
+                signal: lastSignal,
+                confidence: 50,
                 sl: 100,
-                tp: 100,
+                tp: 120,
                 mode: "WAIT_DATA"
             });
         }
@@ -39,56 +38,42 @@ app.get("/signal", (req, res) => {
         let signal = "HOLD";
         let confidence = 0;
 
-        // ===== TREND =====
+        // ===== TREND (DECLARE SEKALI SAHAJA) =====
         let trend = emaFast > emaSlow ? "UP" : "DOWN";
 
-        // ===== AGGRESSIVE V2 FIX =====
-
-// TREND
-let trend = emaFast > emaSlow ? "UP" : "DOWN";
-
-// FORCE ENTRY SYSTEM
-if (trend === "UP") {
-    signal = "BUY";
-    confidence = 65;
-}
-
-if (trend === "DOWN") {
-    signal = "SELL";
-    confidence = 65;
-}
-
-// BOOST CONFIDENCE
-if (Math.abs(macd) > 0.5) confidence += 10;
-if (atr > 2.0) confidence += 10;
-
-// RSI fine tune (optional)
-if (signal === "BUY" && rsi < 50) confidence += 5;
-if (signal === "SELL" && rsi > 50) confidence += 5;
-
-// LIMIT
-if (confidence > 95) confidence = 95;
-        // ===== ANTI HOLD SYSTEM =====
-        if (signal === "HOLD") {
-            // paksa trade kalau terlalu lama hold
-            if (lastSignal === "BUY") signal = "BUY";
-            else if (lastSignal === "SELL") signal = "SELL";
+        // ===== AGGRESSIVE FORCE ENTRY =====
+        if (trend === "UP") {
+            signal = "BUY";
+            confidence = 65;
+        } else {
+            signal = "SELL";
+            confidence = 65;
         }
 
-        if (signal !== "HOLD") {
-            lastSignal = signal;
-        }
+        // ===== BOOST =====
+        if (Math.abs(macd) > 0.5) confidence += 10;
+        if (atr > 2.0) confidence += 10;
+
+        // ===== RSI FINE TUNE =====
+        if (signal === "BUY" && rsi < 50) confidence += 5;
+        if (signal === "SELL" && rsi > 50) confidence += 5;
+
+        // ===== LIMIT =====
+        if (confidence > 95) confidence = 95;
+
+        // ===== SAVE LAST SIGNAL =====
+        lastSignal = signal;
 
         // ===== DYNAMIC SL TP =====
         let sl = Math.max(80, atr * 40);
         let tp = Math.max(120, atr * 60);
 
         const result = {
-            signal,
-            confidence,
+            signal: signal,
+            confidence: confidence,
             sl: Math.round(sl),
             tp: Math.round(tp),
-            mode: MODE
+            mode: "AGGRESSIVE_V2"
         };
 
         console.log("🚀 SIGNAL:", result);
