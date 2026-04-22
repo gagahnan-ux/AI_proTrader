@@ -3,91 +3,75 @@ const app = express();
 
 app.use(express.json());
 
-// ===== STORAGE =====
-let latestData = {};
-let lastSignal = "BUY"; // default supaya tak stuck HOLD
+let latestData = null;
 
-// ===== RECEIVE DATA FROM MT5 =====
+// ===== RECEIVE DATA =====
 app.post("/data", (req, res) => {
-    try {
-        latestData = req.body;
-        console.log("📩 DATA:", latestData);
-        res.json({ status: "ok" });
-    } catch (err) {
-        console.log("❌ DATA ERROR:", err);
-        res.status(500).send("error");
-    }
+  latestData = req.body;
+  console.log("DATA:", latestData);
+  res.json({ status: "ok" });
 });
 
-// ===== AI SIGNAL =====
+// ===== SMART MONEY AI =====
 app.get("/signal", (req, res) => {
-    try {
-        let { rsi, emaFast, emaSlow, macd, atr } = latestData;
+  if (!latestData) {
+    return res.json({
+      signal: "HOLD",
+      confidence: 0,
+      mode: "WAIT_DATA"
+    });
+  }
 
-        // ===== NO DATA =====
-        if (rsi === undefined) {
-            return res.json({
-                signal: lastSignal,
-                confidence: 50,
-                sl: 100,
-                tp: 120,
-                mode: "WAIT_DATA"
-            });
-        }
+  const {
+    emaFast,
+    emaSlow,
+    close,
+    high,
+    low,
+    high_prev,
+    low_prev,
+    rsi,
+    macd
+  } = latestData;
 
-        let signal = "HOLD";
-        let confidence = 0;
+  // ===== TREND =====
+  let trend = emaFast > emaSlow ? "UP" : "DOWN";
 
-        // ===== TREND (DECLARE SEKALI SAHAJA) =====
-        let trend = emaFast > emaSlow ? "UP" : "DOWN";
+  // ===== BASIC MOMENTUM =====
+  let momentumBUY = (rsi > 50 && macd > 0);
+  let momentumSELL = (rsi < 50 && macd < 0);
 
-        // ===== AGGRESSIVE FORCE ENTRY =====
-        if (trend === "UP") {
-            signal = "BUY";
-            confidence = 65;
-        } else {
-            signal = "SELL";
-            confidence = 65;
-        }
+  // ===== BOS (relax sikit) =====
+  let bosBUY = close > high_prev;
+  let bosSELL = close < low_prev;
 
-        // ===== BOOST =====
-        if (Math.abs(macd) > 0.5) confidence += 10;
-        if (atr > 2.0) confidence += 10;
+  // ===== FINAL DECISION =====
+  let signal = "HOLD";
+  let confidence = 0;
 
-        // ===== RSI FINE TUNE =====
-        if (signal === "BUY" && rsi < 50) confidence += 5;
-        if (signal === "SELL" && rsi > 50) confidence += 5;
+  // BUY CONDITION (AGGRESSIVE)
+  if (trend === "UP" && (momentumBUY || bosBUY)) {
+    signal = "BUY";
+    confidence = 70;
+  }
 
-        // ===== LIMIT =====
-        if (confidence > 95) confidence = 95;
+  // SELL CONDITION (AGGRESSIVE)
+  if (trend === "DOWN" && (momentumSELL || bosSELL)) {
+    signal = "SELL";
+    confidence = 70;
+  }
 
-        // ===== SAVE LAST SIGNAL =====
-        lastSignal = signal;
-
-        // ===== DYNAMIC SL TP =====
-        let sl = Math.max(80, atr * 40);
-        let tp = Math.max(120, atr * 60);
-
-        const result = {
-            signal: signal,
-            confidence: confidence,
-            sl: Math.round(sl),
-            tp: Math.round(tp),
-            mode: "AGGRESSIVE_V2"
-        };
-
-        console.log("🚀 SIGNAL:", result);
-
-        res.json(result);
-
-    } catch (err) {
-        console.log("❌ SIGNAL ERROR:", err);
-        res.status(500).send("error");
-    }
+  res.json({
+    signal,
+    confidence,
+    sl: 100,
+    tp: 120,
+    mode: "AGGRESSIVE_V2"
+  });
 });
 
-// ===== START SERVER =====
+// ===== RUN SERVER =====
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-    console.log("🚀 AI SERVER RUNNING ON PORT", PORT);
+  console.log("🚀 SMART MONEY AI RUNNING ON PORT", PORT);
 });
